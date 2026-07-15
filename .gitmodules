@@ -1,0 +1,3 @@
+[submodule "ai sys eng lab/ex 1/beacon-board"]
+	path = ai sys eng lab/ex 1/beacon-board
+	url = git@github.com:kottesh/beacon-board.git

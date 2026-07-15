@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SHA-1 — anything in, 160 bits out</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --slab: #14181d;       /* deep gunmetal ground */
+    --panel: #1b2027;      /* raised machined panel */
+    --panel-2: #10141a;    /* recessed well (inputs) */
+    --etch: #2a323c;       /* hairline / engraving */
+    --phosphor: #4fd6c9;   /* cool phosphor cyan — the digest glow */
+    --phosphor-dim: rgba(79, 214, 201, 0.14);
+    --amber: #e0a03a;      /* warning — SHA-1 is broken; avalanche flips */
+    --wire: #6b7885;       /* muted steel body text */
+    --wire-bright: #9fb0be;
+    --ink: #dfe7ee;        /* near-white foreground */
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--slab);
+    background-image:
+      radial-gradient(circle at 50% -10%, rgba(79,214,201,0.06), transparent 55%);
+    color: var(--ink);
+    font-family: "Inter", system-ui, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 26px; }
+
+  header.mast { padding: 62px 0 30px; }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: var(--phosphor);
+    margin: 0 0 20px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .eyebrow::before {
+    content: ""; width: 26px; height: 1px; background: var(--phosphor); opacity: 0.6;
+  }
+  h1 {
+    font-family: "Chakra Petch", sans-serif;
+    font-weight: 700;
+    font-size: clamp(2.3rem, 6.2vw, 4.4rem);
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    max-width: 18ch;
+  }
+  h1 em { font-style: normal; color: var(--phosphor); }
+  .lede {
+    max-width: 60ch; color: var(--wire); font-size: 1.04rem; margin: 0;
+  }
+  .lede code {
+    font-family: "JetBrains Mono", monospace; color: var(--wire-bright);
+    font-size: 0.9em;
+  }
+
+  /* ---- Hero digest readout: the thesis ---- */
+  .readout {
+    margin: 40px 0 14px;
+    border: 1px solid var(--etch);
+    border-radius: 6px;
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    overflow: hidden;
+  }
+  .readout .bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 18px; border-bottom: 1px solid var(--etch);
+    font-family: "JetBrains Mono", monospace; font-size: 11.5px;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--wire);
+  }
+  .readout .bar .lamp {
+    display: inline-flex; align-items: center; gap: 8px; color: var(--phosphor);
+  }
+  .readout .bar .lamp::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--phosphor); box-shadow: 0 0 9px var(--phosphor);
+  }
+  .readout .bar .len { color: var(--wire-bright); }
+
+  /* the 40-nibble grid — anything collapses to exactly this */
+  .digest {
+    display: grid;
+    grid-template-columns: repeat(20, 1fr);
+    gap: 2px;
+    padding: 20px 18px;
+  }
+  .nib {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 500;
+    font-size: clamp(0.85rem, 2.1vw, 1.35rem);
+    text-align: center;
+    padding: 9px 0;
+    color: var(--phosphor);
+    background: var(--phosphor-dim);
+    border-radius: 3px;
+    transition: background 0.35s ease, color 0.35s ease;
+  }
+  /* a nibble that changed since the last hash flares amber (the avalanche) */
+  .nib.flip { color: var(--amber); background: rgba(224,160,58,0.18); }
+  @media (max-width: 620px) {
+    .digest { grid-template-columns: repeat(10, 1fr); }
+  }
+
+  .avalanche-note {
+    font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+    color: var(--wire); margin: 0 0 46px; display: flex; gap: 10px; align-items: baseline;
+  }
+  .avalanche-note b { color: var(--amber); font-weight: 600; }
+
+  /* ---- Bench ---- */
+  .bench { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 30px; padding-bottom: 40px; align-items: start; }
+  @media (max-width: 900px) { .bench { grid-template-columns: 1fr; } }
+
+  .panel-label {
+    font-family: "JetBrains Mono", monospace; font-size: 11.5px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--wire);
+    display: flex; align-items: center; gap: 12px; margin: 0 0 16px;
+  }
+  .panel-label .n { color: var(--phosphor); font-weight: 700; }
+  .panel-label .rule { flex: 1; height: 1px; background: var(--etch); }
+
+  .field label {
+    display: block; font-family: "JetBrains Mono", monospace; font-size: 12px;
+    letter-spacing: 0.06em; color: var(--wire); margin-bottom: 8px;
+  }
+  textarea, input[type="text"] {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--etch);
+    border-radius: 4px; color: var(--ink); font-family: "JetBrains Mono", monospace;
+    font-size: 0.98rem; padding: 13px 14px; line-height: 1.6;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  textarea { resize: vertical; min-height: 96px; }
+  textarea:focus, input:focus {
+    outline: none; border-color: var(--phosphor);
+    box-shadow: 0 0 0 3px var(--phosphor-dim);
+  }
+
+  .btn-row { display: flex; gap: 11px; flex-wrap: wrap; margin: 14px 0 0; }
+  .btn {
+    font-family: "JetBrains Mono", monospace; font-size: 12.5px; letter-spacing: 0.05em;
+    padding: 10px 16px; border-radius: 4px; border: 1px solid var(--etch);
+    background: var(--panel); color: var(--wire-bright); cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.05s;
+  }
+  .btn:hover { border-color: var(--phosphor); color: var(--phosphor); }
+  .btn:active { transform: translateY(1px); }
+  .btn.solid { background: var(--phosphor); color: var(--slab); border-color: var(--phosphor); font-weight: 500; }
+  .btn.solid:hover { filter: brightness(1.08); color: var(--slab); }
+
+  /* ---- Machinery panel (right) ---- */
+  .machine { border: 1px solid var(--etch); border-radius: 6px; background: var(--panel); }
+  .machine .head {
+    padding: 14px 18px; border-bottom: 1px solid var(--etch);
+    font-family: "Chakra Petch", sans-serif; font-weight: 600; font-size: 1.02rem;
+  }
+  .stage {
+    padding: 15px 18px; border-bottom: 1px solid var(--etch);
+  }
+  .stage:last-child { border-bottom: none; }
+  .stage .k {
+    font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--wire); margin: 0 0 8px;
+  }
+  .stage .v {
+    font-family: "JetBrains Mono", monospace; font-size: 0.85rem; color: var(--wire-bright);
+    word-break: break-all; line-height: 1.7;
+  }
+  .stage .v .pad0 { color: var(--phosphor); }
+  .stage .v .mark { color: var(--phosphor); }
+  .stage .v .lenbytes { color: var(--amber); }
+  .stage .v .summary { color: var(--wire); display: block; margin-top: 6px; }
+  .regs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .reg {
+    text-align: center; padding: 8px 2px; border: 1px solid var(--etch); border-radius: 3px;
+    background: var(--panel-2);
+  }
+  .reg .lbl { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--phosphor); letter-spacing: 0.1em; }
+  .reg .hex { font-family: "JetBrains Mono", monospace; font-size: 0.72rem; color: var(--wire-bright); margin-top: 3px; word-break: break-all; }
+
+  .roundscroll { max-height: 178px; overflow-y: auto; margin-top: 4px; }
+  .roundscroll table { width: 100%; border-collapse: collapse; font-family: "JetBrains Mono", monospace; font-size: 0.72rem; }
+  .roundscroll th { position: sticky; top: 0; background: var(--panel); color: var(--wire); font-weight: 500; text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--etch); letter-spacing: 0.08em; }
+  .roundscroll td { padding: 3px 6px; color: var(--wire-bright); border-bottom: 1px solid rgba(42,50,60,0.5); }
+  .roundscroll td.t { color: var(--phosphor); }
+  .roundscroll::-webkit-scrollbar { width: 8px; }
+  .roundscroll::-webkit-scrollbar-thumb { background: var(--etch); border-radius: 4px; }
+
+  footer {
+    border-top: 1px solid var(--etch); padding: 22px 0 56px; margin-top: 12px;
+    font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--wire);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  }
+  footer .amber { color: var(--amber); }
+  footer .phos { color: var(--phosphor); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <p class="eyebrow">Cryptographic hash · one-way compression</p>
+    <h1>Type a novel or a single space. It leaves as <em>160 bits.</em></h1>
+    <p class="lede">
+      SHA-1 crushes any input — one byte or a gigabyte — into a fixed
+      <code>40-hex</code> fingerprint, and there's no way back. The message is
+      padded to a multiple of 512 bits, cut into blocks, and stirred through 80
+      rounds that mix five 32-bit registers. Change one letter below and watch
+      roughly half the output flip.
+    </p>
+  </header>
+
+  <!-- HERO: the live digest -->
+  <div class="readout">
+    <div class="bar">
+      <span class="lamp">digest · 160-bit fingerprint</span>
+      <span class="len" id="lenLabel">0 bytes in</span>
+    </div>
+    <div class="digest" id="digest" aria-live="polite"></div>
+  </div>
+  <p class="avalanche-note">
+    <b id="avalancheCount">avalanche</b>
+    <span id="avalancheText">flip one input bit (or edit a character) and about half of the 160 output bits should move.</span>
+  </p>
+
+  <main class="bench">
+    <!-- LEFT: input -->
+    <section>
+      <p class="panel-label"><span class="n">01</span> Message <span class="rule"></span> hashed live as you type</p>
+      <div class="field">
+        <label>plaintext (UTF-8)</label>
+        <textarea id="message" spellcheck="false">The quick brown fox jumps over the lazy dog</textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="flipBit">Flip last character</button>
+        <button class="btn" id="clear">Clear</button>
+        <button class="btn solid" id="copy">Copy digest</button>
+      </div>
+      <p class="avalanche-note" style="margin-top:20px;">
+        <span>Known check — <code style="font-family:'JetBrains Mono',monospace;color:var(--wire-bright)">"abc"</code> hashes to
+        <code style="font-family:'JetBrains Mono',monospace;color:var(--phosphor)">a9993e36…9cd0d89d</code>.</span>
+      </p>
+    </section>
+
+    <!-- RIGHT: machinery -->
+    <section class="machine">
+      <div class="head">Inside the machine</div>
+      <div class="stage">
+        <p class="k">1 · Padding → multiple of 512 bits</p>
+        <div class="v" id="padView"></div>
+      </div>
+      <div class="stage">
+        <p class="k">2 · Working registers (final block)</p>
+        <div class="regs" id="regView"></div>
+      </div>
+      <div class="stage">
+        <p class="k">3 · Round trace (final block · a b c d e)</p>
+        <div class="roundscroll">
+          <table>
+            <thead><tr><th>t</th><th>a</th><th>b</th><th>c</th><th>d</th><th>e</th></tr></thead>
+            <tbody id="roundBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>SHA-1 demonstrator · byte-exact, RFC 3174, no library</span>
+    <span><span class="amber">deprecated:</span> collisions are practical (SHAttered, <span class="phos">2017</span>) — do not use for security</span>
+  </footer>
+</div>
+
+<script src="sha1.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

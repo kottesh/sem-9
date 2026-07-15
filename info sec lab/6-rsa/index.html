@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RSA — the trapdoor, worked by hand</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ground: #f0e7db;      /* café au lait — warm milky coffee off-white */
+    --ground-2: #faf5ec;    /* raised, lighter cream (inputs) */
+    --paper: #3b2f26;       /* espresso ink (warm dark brown) */
+    --ink: #3b2f26;
+    --brass: #b07d3c;       /* roasted caramel — the one accent */
+    --public: #5f8f8a;      /* public-key lane — muted mocha-teal */
+    --private: #c07a55;     /* private-key lane — warm terracotta */
+    --grid: rgba(95, 143, 138, 0.08);
+    --hair: rgba(59, 47, 38, 0.14);
+    --muted: rgba(59, 47, 38, 0.55);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background-color: var(--ground);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 26px 26px;
+    color: var(--paper);
+    font-family: "Inter", system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+
+  /* ---- Masthead ---- */
+  header.mast {
+    padding: 68px 0 34px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 700;
+    font-size: clamp(2.4rem, 6vw, 4.6rem);
+    line-height: 0.98;
+    letter-spacing: -0.02em;
+    margin: 0 0 20px;
+    max-width: 16ch;
+  }
+  h1 em {
+    font-style: normal;
+    color: var(--brass);
+  }
+  .lede {
+    max-width: 58ch;
+    color: var(--muted);
+    font-size: 1.05rem;
+    margin: 0;
+  }
+  .lede code {
+    font-family: "IBM Plex Mono", monospace;
+    color: var(--paper);
+    font-size: 0.92em;
+  }
+
+  /* ---- Bench layout ---- */
+  .bench {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 34px;
+    padding: 44px 0 90px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .bench { grid-template-columns: 1fr; }
+  }
+
+  .panel-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin: 0 0 18px;
+  }
+  .panel-label .mark {
+    font-weight: 600;
+    color: var(--brass);
+  }
+  .panel-label .rule {
+    flex: 1;
+    height: 1px;
+    background: var(--hair);
+  }
+
+  /* ---- Forge (left) ---- */
+  .forge .primes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .field label {
+    display: block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 7px;
+  }
+  .field label b { color: var(--brass); font-weight: 600; }
+  input[type="text"], input[type="number"], textarea {
+    width: 100%;
+    background: var(--ground-2);
+    border: 1px solid var(--hair);
+    border-radius: 2px;
+    color: var(--paper);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 1rem;
+    padding: 12px 13px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--brass);
+    box-shadow: 0 0 0 3px rgba(232, 184, 75, 0.16);
+  }
+  textarea { resize: vertical; min-height: 74px; line-height: 1.55; }
+
+  .btn {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    padding: 11px 18px;
+    border-radius: 2px;
+    border: 1px solid var(--brass);
+    background: transparent;
+    color: var(--brass);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.05s ease;
+  }
+  .btn:hover { background: var(--brass); color: var(--ground); }
+  .btn:active { transform: translateY(1px); }
+  .btn.solid { background: var(--brass); color: var(--ground); }
+  .btn.solid:hover { filter: brightness(1.08); }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 14px; }
+
+  /* ---- Derivation ledger (the signature) ---- */
+  .ledger {
+    position: relative;
+    margin-top: 8px;
+    padding-left: 26px;
+  }
+  /* the gold thread that runs from primes down to the keypair */
+  .ledger::before {
+    content: "";
+    position: absolute;
+    left: 7px; top: 12px; bottom: 12px;
+    width: 2px;
+    background: linear-gradient(var(--brass), rgba(232,184,75,0.15));
+  }
+  .row {
+    position: relative;
+    padding: 13px 0;
+    border-bottom: 1px dashed var(--hair);
+  }
+  .row:last-child { border-bottom: none; }
+  .row::before {
+    content: "";
+    position: absolute;
+    left: -22px; top: 20px;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--ground);
+    border: 2px solid var(--brass);
+  }
+  .row .sym {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 600;
+    font-size: 0.98rem;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .row .formula {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .row .val {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 1.15rem;
+    color: var(--paper);
+    word-break: break-all;
+    margin-top: 4px;
+  }
+  .row.key .val { color: var(--brass); font-weight: 600; }
+  .row.public .sym { color: var(--public); }
+  .row.private .sym { color: var(--private); }
+  .row .val.pub { color: var(--public); }
+  .row .val.priv { color: var(--private); }
+
+  /* ---- Channel (right) ---- */
+  .lane {
+    border: 1px solid var(--hair);
+    border-radius: 3px;
+    padding: 20px;
+    margin-bottom: 20px;
+    background: rgba(95, 143, 138, 0.07);
+  }
+  .lane.pub { border-left: 3px solid var(--public); }
+  .lane.priv { border-left: 3px solid var(--private); }
+  .lane h3 {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: 1.05rem;
+    margin: 0 0 3px;
+  }
+  .lane .who {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin: 0 0 15px;
+  }
+  .lane.pub .who { color: var(--public); }
+  .lane.priv .who { color: var(--private); }
+
+  .output {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.95rem;
+    background: var(--ground);
+    border: 1px dashed var(--hair);
+    border-radius: 2px;
+    padding: 13px;
+    min-height: 46px;
+    margin-top: 13px;
+    word-break: break-all;
+    color: var(--paper);
+    line-height: 1.7;
+  }
+  .output.empty { color: var(--muted); font-style: italic; }
+  .output .num { color: var(--public); }
+  .output .plain { color: var(--private); }
+
+  .hint {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 9px 0 0;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .err {
+    color: #b5532f;
+    border-color: rgba(240, 165, 138, 0.4);
+    font-style: normal;
+  }
+
+  footer {
+    border-top: 1px solid var(--hair);
+    padding: 26px 0 60px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer .brass { color: var(--brass); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .row { animation: settle 0.4s ease both; }
+    @keyframes settle {
+      from { opacity: 0; transform: translateX(-6px); }
+      to { opacity: 1; transform: none; }
+    }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <p class="eyebrow">Public-key cryptography · worked by hand</p>
+    <h1>Two primes go in. A lock and its only key come <em>out.</em></h1>
+    <p class="lede">
+      RSA's whole secret is a one-way street: multiplying <code>p·q</code> is easy,
+      factoring the result back apart is not. Pick two primes below and watch the
+      keypair get <em>derived</em>, digit by digit — then send a message down the
+      public lane and read it back with the private one.
+    </p>
+  </header>
+
+  <main class="bench">
+    <!-- LEFT: the forge -->
+    <section class="forge">
+      <p class="panel-label"><span class="mark">A</span> The forge <span class="rule"></span> derive keys from primes</p>
+
+      <div class="primes">
+        <div class="field">
+          <label>prime <b>p</b></label>
+          <input id="p" type="text" value="61" inputmode="numeric" />
+        </div>
+        <div class="field">
+          <label>prime <b>q</b></label>
+          <input id="q" type="text" value="53" inputmode="numeric" />
+        </div>
+      </div>
+
+      <div class="field" style="margin-bottom:14px;">
+        <label>public exponent <b>e</b> <span style="opacity:.6">(optional — auto-chosen if blank)</span></label>
+        <input id="e" type="text" value="17" inputmode="numeric" />
+      </div>
+
+      <div class="btn-row">
+        <button class="btn solid" id="derive">Forge keypair</button>
+        <button class="btn" id="roll">Roll fresh primes</button>
+      </div>
+
+      <div class="ledger" id="ledger" aria-live="polite"></div>
+    </section>
+
+    <!-- RIGHT: the channel -->
+    <section class="channel">
+      <p class="panel-label"><span class="mark">B</span> The channel <span class="rule"></span> encrypt, then recover</p>
+
+      <div class="lane pub">
+        <h3>Seal a message</h3>
+        <p class="who">Public lane · anyone can encrypt with (e, n)</p>
+        <div class="field">
+          <label>plaintext</label>
+          <textarea id="plaintext">meet at dawn</textarea>
+        </div>
+        <div class="btn-row" style="margin-top:12px;margin-bottom:0;">
+          <button class="btn" id="encrypt">Encrypt →</button>
+        </div>
+        <div class="output empty" id="cipherOut">Ciphertext appears here as a run of numbers, one per character.</div>
+      </div>
+
+      <div class="lane priv">
+        <h3>Open the message</h3>
+        <p class="who">Private lane · only (d, n) can decrypt</p>
+        <div class="btn-row" style="margin-bottom:0;">
+          <button class="btn" id="decrypt">← Decrypt with private key</button>
+        </div>
+        <div class="output empty" id="plainOut">Recovered text appears here after you decrypt.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>RSA demonstrator · exact BigInt arithmetic, no rounding</span>
+    <span>character codes must stay below <span class="brass">n</span> — small primes, small alphabet</span>
+  </footer>
+</div>
+
+<script src="rsa.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

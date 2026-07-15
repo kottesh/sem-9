@@ -1,0 +1,33 @@
+# ── Compiled binaries / build output ─────────────────────────────
+info sec lab/server
+info sec lab/client
+run
+*.o
+*.obj
+*.exe
+*.out
+
+# ── JS / Node ─────────────────────────────────────────────────────
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+
+# ── Editor / app state ────────────────────────────────────────────
+.obsidian/
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Office / LibreOffice lock & temp files ────────────────────────
+.~lock.*#
+~$*
+
+# ── Derived / extracted artifacts (regenerable from source PDFs) ──
+suid/suid_extracted_images/
+
+# ── OS cruft ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
