@@ -1,4 +1,4 @@
-CXX      := g++
+CXX      := clang++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 
 # Auto-discover exercises: each lives in its own folder as

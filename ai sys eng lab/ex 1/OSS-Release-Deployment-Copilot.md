@@ -1,364 +1,251 @@
-# OSS Release Deployment Copilot — Flowise Build
+# OSS Release Deployment Copilot — Architecture
 
-A solo-dev / OSS **Release Notes & Deployment Coordination** agent built in Flowise
-(Agentflow V2). It inspects a GitHub repo, drafts release notes, scores release
-readiness/risk, gates go/no-go, plans deployment + rollback, asks the maintainer to
-confirm, and notifies Slack across the release lifecycle.
+A Flowise **Agentflow V2** workflow that takes a solo/OSS project from "code on `main`"
+to "released and deployed" with a human approval gate in the middle.
 
-It is a **support/copilot**, not an autonomous deployer. It never runs `git push`,
-never publishes a release, and never triggers workflows on its own. It produces plans,
-commands, drafts, and notifications; the maintainer executes.
+On trigger it: reads the GitHub repo, drafts release notes, scores readiness/risk,
+gates go/no-go, asks the maintainer to approve, then — on approval — **publishes a real
+GitHub Release**, lets the tag push trigger the deploy, **polls the deploy to
+completion**, and reports success or failure (with a rollback suggestion) to Slack.
+
+It is a **copilot with one real action boundary**: it never deploys on its own. Nothing
+past the approval gate runs until a human clicks Proceed. After that, it performs the
+release + monitors the deploy for real.
 
 ---
 
-## 1. Environment
+## 1. System overview
+
+```
+        You                Flowise flow                    GitHub                Slack
+         │  submit form         │                             │                    │
+         ├─────────────────────▶│  read context ─────────────▶│                    │
+         │                      │  draft notes / score risk   │                    │
+         │                      │  ── "ready for review" ─────────────────────────▶│
+         │  ◀── approve? ───────│  (pause: Human Input)       │                    │
+         ├── Proceed ──────────▶│                             │                    │
+         │                      │  publish release ──────────▶│ (creates tag)      │
+         │                      │  ── "released" ─────────────────────────────────▶│
+         │                      │                             │ tag push →         │
+         │                      │                             │ deploy-pages runs  │
+         │                      │  poll run status ◀──────────│                    │
+         │                      │  ── "deployed" / "failed" ──────────────────────▶│
+         │  ◀── final reply ────│                             │                    │
+```
+
+Two distinct triggers, do not confuse them:
+
+| | What runs | Fired by |
+|---|---|---|
+| **Flow** | the Flowise agentflow | you (form submit / API call) |
+| **Deploy** | GitHub `deploy-pages.yml` | a **tag push** `v*.*.*` (created when the flow publishes the release) |
+
+The flow triggers the deploy indirectly, by publishing a release whose tag matches `v*`.
+
+---
+
+## 2. Environment
 
 | Thing | Value |
 |---|---|
-| Flowise | 3.1.2 (Docker, `flowiseai/flowise:latest`) |
-| Flowise URL | http://localhost:3000 |
-| Flowise data | Docker volume `flowise_data` → `/root/.flowise` |
-| LLM provider | Cloudsway (OpenAI-compatible) via `.pi` config |
-| Model | `MaaS_Cl_Sonnet_4.6_20260217` (Claude Sonnet 4.6) |
-| Model base URL | `https://genaiapi.cloudsway.net/v1` |
-| GitHub access | `gh` CLI (host) + GitHub REST API (inside Flowise custom tool) |
+| Flowise | 3.1.2 (Docker, `flowiseai/flowise:latest`), `http://localhost:3000` |
+| LLM | Cloudsway (OpenAI-compatible), model `MaaS_Cl_Sonnet_4.6_20260217`, base `https://genaiapi.cloudsway.net/v1` |
+| GitHub access | GitHub REST API from inside custom tools, authed with `github_token` variable (`repo` scope) |
 | Notifications | Slack Incoming Webhook |
-| Demo repo | https://github.com/kottesh/beacon-board |
-| Demo repo (local) | `/home/kottes/worktree/uni/5th year/sem 9/ai sys eng lab/ex 1/beacon-board` |
+| File tools | none — the flow persists nothing locally; all deliverables live on GitHub |
+| Demo repo | `kottesh/beacon-board` (static status board, deploys to GitHub Pages) |
 
-### Flowise API auth
-All admin calls use an API key as a Bearer token:
-
-```
-Authorization: Bearer <FLOWISE_API_KEY>
-```
+**Cloudsway wiring:** the standard `ChatOpenAI` node with `basepath` pointed at
+Cloudsway — no custom provider. The credential must carry both `credential` and
+`FLOWISE_CREDENTIAL_ID`.
 
 ---
 
-## 2. Flowise objects created
-
-### Credential
-| id | name | credentialName |
-|---|---|---|
-| `71792a5b-09e6-4aa3-992f-5391b7de79c6` | Cloudsway OpenAI Compatible | `openAIApi` |
-
-The Cloudsway API key is stored encrypted inside this credential. Nodes reference it
-by id and set `basepath = https://genaiapi.cloudsway.net/v1`, so the standard
-`ChatOpenAI` node talks to Cloudsway.
-
-### Variables
-| id | name | value | used by |
-|---|---|---|---|
-| `a03b3990-b4e4-4549-9f75-59b0fbe4c5cd` | `github_token` | gh auth token | `github_release_context` (`$vars.github_token`) |
-| `3d839b52-36aa-43b2-b078-f0c4f004de70` | `slack_webhook_url` | **configured** (live Slack webhook) | `slack_send_notification` (`$vars.slack_webhook_url`) |
-
-> Slack is **configured and tested** — the webhook is set and a test message posted
-> successfully (`ok`). The flow's Slack nodes now post for real. If the webhook were
-> ever unset, the tool safely degrades to returning the drafted message (no errors).
->
-> Security note: the webhook URL is stored in the Flowise DB. Rotate it (delete +
-> recreate in the Slack app) if it leaks beyond this demo — anyone with the URL can
-> post to the channel.
-
-### Custom tools
-| id | name | purpose |
-|---|---|---|
-| `a197895e-88bf-493b-8557-6a232dc5cee7` | `github_release_context` | Pull all release context from a GitHub repo |
-| `3793be90-d8af-4f4c-b561-3c20091d55d1` | `slack_send_notification` | Post a message to Slack (or return draft) |
-
-### Chatflow
-| id | name | type |
-|---|---|---|
-| `7cb45c2a-0360-43eb-b6a0-97a40b38b57f` | OSS Release Deployment Copilot | AGENTFLOW |
-
----
-
-## 3. Why Agentflow V2 (not V1)
-
-V2 gives three things this workflow genuinely needs:
-
-- **Flow State** — pass `releaseNotes`, `gate`, `risk`, `deployPlan`, `releaseDraft`
-  between nodes without stuffing everything into one mega prompt.
-- **Condition node** — deterministic go/no-go branching on `gate`.
-- **Human Input node** — a real human-in-the-loop checkpoint before the "deploy"
-  branch (safety: nothing proceeds without maintainer approval).
-
-Node types used: `startAgentflow`, `agentAgentflow`, `llmAgentflow`,
-`conditionAgentflow`, `humanInputAgentflow`, `directReplyAgentflow`.
-
----
-
-## 4. The flow
-
-### Diagram
+## 3. The flow
 
 ```
 Start (form: owner, repo, base, head, targetVersion)
-  │  flow state: releaseNotes, readiness, risk, gate, deployPlan, rollbackPlan, releaseDraft
   ▼
-[Agent] Release Context Collector      → tool: github_release_context
+[Agent]     Release Context Collector      → github_release_context
   ▼
-[LLM] Release Notes Writer             → state.releaseNotes
+[LLM]       Release Notes Writer           → state.releaseNotes
   ▼
-[LLM] Risk & Readiness Analyzer        → state.gate / state.risk / state.readiness (JSON)
+[LLM]       Risk & Readiness Analyzer      → state.gate / risk / readiness
   ▼
-[Condition] Deployment Gate            → gate == "NOGO" ?
-  ├── NOGO ─────▶ [Agent] Notify Blocked (Slack) ──▶ [Reply] Blocked
-  └── GO / WARN ─▶ [LLM] Deployment & Rollback Planner  → state.deployPlan
-                    ▼
-                  [Agent] Notify Plan Ready (Slack)
-                    ▼
-                  [Human] Confirm Deploy               (HITL checkpoint)
-                    ├── proceed ─▶ [Agent] Notify Deploy Starting (Slack)
-                    │               ▶ [LLM] GitHub Release Draft  → state.releaseDraft
-                    │               ▶ [Reply] Ready to Ship
-                    └── stop ─────▶ [Reply] Paused
+[Condition] Deployment Gate  (gate == NOGO ?)
+  ├─ NOGO ─▶ [Agent] Notify Blocked ─▶ [Reply] Blocked                    ── STOP
+  └─ else ─▶ [LLM] Deployment & Rollback Planner → state.deployPlan
+              ▼
+            [Agent] Notify Plan Ready
+              ▼
+            [Human] Confirm Deploy   ◀── approval gate; nothing real happens before this
+              ├─ reject ─▶ [Reply] Paused                                 ── STOP
+              └─ approve ─▶
+                  [LLM]  Compose Release Body        → state.releaseDraft
+                  [Tool] Publish GitHub Release      → state.releaseUrl / releaseTag   *** REAL ***
+                  [Agent]Notify Release Published
+                  [Tool] Check Deploy Status         → state.deployStatus/Conclusion/Done/runUrl
+                  [Condition] Deploy Finished?
+                     ├─ no  ─▶ [Loop] Wait & Re-check ──▶ back to Check Deploy Status
+                     └─ yes ─▶ [Condition] Deploy Succeeded?
+                                 ├─ success ─▶ [Agent] Notify Deployed ─▶ [Reply] Shipped   ── STOP
+                                 └─ failure ─▶ [Agent] Notify Deploy Failed
+                                                ▶ [LLM] Rollback Advisor → state.rollbackPlan
+                                                ▶ [Agent] Notify Rollback
+                                                ▶ [Reply] Failed                             ── STOP
 ```
 
-### Nodes (14) and roles
+### Three outcomes
+- **Blocked** — the gate said NOGO; Slack notified, nothing published.
+- **Shipped** — released, deployed, verified green; Slack + live-site link.
+- **Failed** — released but the deploy failed; Slack alert + rollback advice.
 
-| # | Node (label) | Type | Does |
+---
+
+## 4. Nodes
+
+| Node | Type | Role | Reads state | Writes state |
+|---|---|---|---|---|
+| Start | start | Form input; declares flow-state keys | — | — |
+| Release Context Collector | agent | Calls `github_release_context`, summarizes facts | — | — |
+| Release Notes Writer | llm | Writes OSS release notes | context | `releaseNotes` |
+| Risk & Readiness Analyzer | llm | JSON verdict (gate/risk/blockers) | context | `gate`, `risk`, `readiness` |
+| Deployment Gate | condition | Branch on `gate == NOGO` | `gate` | — |
+| Notify Blocked | agent | Slack: BLOCKED | `readiness`, `risk` | — |
+| Reply: Blocked | directReply | End (blocked) | `readiness` | — |
+| Deployment & Rollback Planner | llm | Preflight/deploy/verify/rollback plan | `gate`, `risk` | `deployPlan` |
+| Notify Plan Ready | agent | Slack: READY FOR REVIEW | `gate`, `risk` | — |
+| Confirm Deploy | humanInput | **Approval gate** (Proceed / Reject) | — | — |
+| Reply: Paused | directReply | End (rejected) | `deployPlan` | — |
+| Compose Release Body | llm | Final release-notes markdown for GitHub | `releaseNotes` | `releaseDraft` |
+| Publish GitHub Release | tool | **Publishes release + tag** | `releaseDraft` | `releaseUrl`, `releaseTag` |
+| Notify Release Published | agent | Slack: RELEASED | `releaseUrl`, `releaseTag` | — |
+| Check Deploy Status | tool | Polls deploy run (waits ~15s/call) | — | `deployStatus`, `deployConclusion`, `deployDone`, `runUrl` |
+| Deploy Finished? | condition | Branch on `deployDone == true` | `deployDone` | — |
+| Wait & Re-check | loop | Loops back to Check Deploy Status (max 12) | — | — |
+| Deploy Succeeded? | condition | Branch on `deployConclusion == success` | `deployConclusion` | — |
+| Notify Deployed | agent | Slack: DEPLOYED (+ live URL) | `releaseTag`, `runUrl` | — |
+| Reply: Shipped | directReply | End (success) | `releaseUrl`, `runUrl` | — |
+| Notify Deploy Failed | agent | Slack: DEPLOY FAILED | `releaseTag`, `runUrl` | — |
+| Rollback Advisor | llm | Rollback steps for the maintainer | `base`, `runUrl` | `rollbackPlan` |
+| Notify Rollback | agent | Slack: ROLLBACK SUGGESTED | `rollbackPlan` | — |
+| Reply: Failed | directReply | End (failure) | `runUrl`, `rollbackPlan` | — |
+
+**Why Agentflow V2:** it needs shared **flow state** (pass notes/gate/URLs between
+nodes), a **Condition** node (deterministic go/no-go and success branching), a
+**Human Input** node (the approval gate), and a **Loop** node (poll the deploy until
+done). V1 has none of these cleanly.
+
+---
+
+## 5. Flow state
+
+Declared on Start, written/read across nodes. This is the memory that lets each node
+stay a small focused prompt instead of one mega-prompt.
+
+| Key | Written by | Meaning |
+|---|---|---|
+| `releaseNotes` | Release Notes Writer | Draft notes (human-readable) |
+| `readiness` | Risk & Readiness Analyzer | One-paragraph readiness summary |
+| `risk` | Risk & Readiness Analyzer | `low` / `medium` / `high` |
+| `gate` | Risk & Readiness Analyzer | `GO` / `WARN` / `NOGO` |
+| `deployPlan` | Deployment & Rollback Planner | Deploy + rollback steps |
+| `releaseDraft` | Compose Release Body | Final markdown published as the release body |
+| `releaseUrl` | Publish GitHub Release | URL of the published release |
+| `releaseTag` | Publish GitHub Release | The published tag |
+| `deployStatus` | Check Deploy Status | `queued` / `in_progress` / `completed` |
+| `deployConclusion` | Check Deploy Status | `success` / `failure` / … |
+| `deployDone` | Check Deploy Status | `true` when the run is completed |
+| `runUrl` | Check Deploy Status | URL of the deploy workflow run |
+| `rollbackPlan` | Rollback Advisor | Rollback recommendation (failure path only) |
+
+---
+
+## 6. Gate logic (Risk & Readiness Analyzer)
+
+Returns JSON: `gate`, `risk`, `riskReasons[]`, `blockers[]`, `warnings[]`, `summary`.
+
+- **NOGO** — latest CI on `head` failed, **or** no commits between `base` and `head`,
+  **or** the target version is already released.
+- **WARN** — risky files changed (`.github/workflows/*`, `package.json`,
+  `package-lock.json`, `Dockerfile`, `src/config/*`, `migrations/*`), **or**
+  `CHANGELOG.md` doesn't mention the target version.
+- **GO** — otherwise.
+
+`WARN` still proceeds to the approval gate (the human decides); only `NOGO` hard-stops.
+
+---
+
+## 7. Tools
+
+Three custom tools (GitHub REST + Slack). All run in the Flowise NodeVM sandbox and
+read secrets from Flowise **variables**, never from prompts. Sandbox notes: `fetch` is
+not global — tools use `require('node-fetch')`.
+
+| Tool | Kind | Reads / Writes GitHub | Purpose |
 |---|---|---|---|
-| 1 | Start | start | Form input + declares flow-state keys |
-| 2 | Release Context Collector | agent | Calls `github_release_context`, summarizes facts |
-| 3 | Release Notes Writer | llm | OSS release notes → `state.releaseNotes` |
-| 4 | Risk & Readiness Analyzer | llm | Structured JSON → `state.gate/risk/readiness` |
-| 5 | Deployment Gate | condition | `gate == NOGO` → branch |
-| 6 | Notify Blocked (Slack) | agent | `slack_send_notification` (🛑 blocked) |
-| 7 | Reply: Blocked | directReply | Show blockers + readiness |
-| 8 | Deployment & Rollback Planner | llm | Preflight/deploy/verify/rollback → `state.deployPlan` |
-| 9 | Notify Plan Ready (Slack) | agent | `slack_send_notification` (📦 ready) |
-| 10 | Confirm Deploy | humanInput | proceed / stop |
-| 11 | Notify Deploy Starting (Slack) | agent | `slack_send_notification` (🚀 starting) |
-| 12 | GitHub Release Draft | llm | Final release body + verification → `state.releaseDraft` |
-| 13 | Reply: Ready to Ship | directReply | Notes + plan + draft |
-| 14 | Reply: Paused | directReply | Plan preserved, deployment paused |
+| `github_release_context` | read | read-only | Repo info, tags, releases, commit diff `base..head`, changed files, CI run status, workflows, CHANGELOG, package.json, README |
+| `github_create_release` | **write** | **publishes release + tag** | Publishes the GitHub Release (idempotent — skips if the tag's release already exists). Returns `releaseUrl`, `tag` |
+| `github_run_status` | read | read-only | Returns the latest `deploy-pages.yml` run's `status` / `conclusion` / `runUrl`. Waits ~15s before returning so it paces the poll loop |
+| `slack_send_notification` | — | — | Posts `{text}` to the Slack webhook. Degrades to returning the draft if the webhook is unset |
 
-### Edges (13)
+Only `github_create_release` crosses the write boundary, and it sits **after** the
+Human Input gate. Everything before the gate is read-only.
 
-```
-Start                     → Release Context Collector
-Release Context Collector → Release Notes Writer
-Release Notes Writer      → Risk & Readiness Analyzer
-Risk & Readiness Analyzer → Deployment Gate
-Deployment Gate [NOGO]    → Notify Blocked (Slack)
-Notify Blocked (Slack)    → Reply: Blocked
-Deployment Gate [GO/WARN] → Deployment & Rollback Planner
-Deployment & Rollback Pl. → Notify Plan Ready (Slack)
-Notify Plan Ready (Slack) → Confirm Deploy
-Confirm Deploy [proceed]  → Notify Deploy Starting (Slack)
-Notify Deploy Starting    → GitHub Release Draft
-GitHub Release Draft      → Reply: Ready to Ship
-Confirm Deploy [stop]     → Reply: Paused
-```
-
-### Flow state keys
-
-| Key | Written by | Read by |
-|---|---|---|
-| `releaseNotes` | Release Notes Writer | Reply: Ready to Ship, GitHub Release Draft |
-| `readiness` | Risk & Readiness Analyzer | Notify Blocked, Reply: Blocked |
-| `risk` | Risk & Readiness Analyzer | Planner, Slack notifications |
-| `gate` | Risk & Readiness Analyzer | Deployment Gate condition |
-| `deployPlan` | Deployment & Rollback Planner | Reply: Ready/Paused |
-| `rollbackPlan` | (reserved / folded into deployPlan) | — |
-| `releaseDraft` | GitHub Release Draft | Reply: Ready to Ship |
+### The deploy poll loop
+`Check Deploy Status` → `Deploy Finished?` → (`Wait & Re-check` loops back) until
+`deployDone == true`, capped at **12 iterations** (~3 min at ~15s each). The 15s pace
+lives inside the `github_run_status` tool because Agentflow has no delay node.
 
 ---
 
-## 5. Gate logic (Risk & Readiness Analyzer)
+## 8. Slack message style
 
-The analyzer returns raw JSON: `gate`, `risk`, `riskReasons[]`, `blockers[]`,
-`warnings[]`, `summary`.
+Notifications are **structured, not emoji-driven**. Each message is a distinct,
+glanceable event using layout — not decoration — to differentiate:
 
-- **NOGO** if: latest CI run on `head` failed, OR no commits between `base` and `head`,
-  OR the target version tag is already released.
-- **WARN** if: risky files changed
-  (`.github/workflows/*`, `package.json`, `package-lock.json`, `Dockerfile`,
-  `src/config/*`, `migrations/*`) OR `CHANGELOG.md` does not mention the target version.
-- **GO** otherwise.
+- A **divider line** (`───────────────`) as a hard top edge for every message.
+- A **bold ALL-CAPS status word** as the verdict: `BLOCKED`, `READY FOR REVIEW`,
+  `RELEASED`, `DEPLOYED`, `DEPLOY FAILED`, `ROLLBACK SUGGESTED`.
+- `›` bullets, `_italic_` labels, `*bold*` values, `` `code` `` refs, `<url|label>` links.
+- Slack **mrkdwn** only — no `#` headers, no `**double asterisks**`, no tables.
+- Verdict line → blank line → ≤3 detail lines → link. Full detail (readiness tables,
+  full notes) lives on GitHub, not Slack.
 
----
+Example:
+```
+───────────────
+*RELEASED*  kottesh/beacon-board  `v0.3.0`
 
-## 6. Slack notification events
-
-**Status: live.** Webhook configured, test message posted (`ok`).
-
-Currently wired:
-
-| Event | Node | Prefix |
-|---|---|---|
-| Deployment blocked (NOGO) | Notify Blocked | `🛑 Deployment blocked` |
-| Release ready (GO/WARN) | Notify Plan Ready | `📦 Release … ready` |
-| Deploy starting (after approval) | Notify Deploy Starting | `🚀 Deployment starting` |
-
-Easy to add later (same pattern): deploy completed ✅, deploy failed ❌,
-rollback recommended ↩️, release published 🏷️.
-
-Test that posting works at any time:
-
-```bash
-curl -X POST -H 'Content-Type: application/json' \
-  --data '{"text":"OSS Release Copilot connected ✅"}' \
-  "$SLACK_WEBHOOK_URL"
+› _Tag:_ `v0.3.0` published
+› _Deploy:_ starting now
+<https://github.com/kottesh/beacon-board/releases/tag/v0.3.0|View release>
 ```
 
 ---
 
-## 7. Custom tool: `github_release_context`
+## 9. GitHub side (what the deploy needs)
 
-**Input schema**
+The demo repo deploys to **GitHub Pages** via `deploy-pages.yml`.
 
-| property | type | required | notes |
-|---|---|---|---|
-| `owner` | string | yes | e.g. `kottesh` |
-| `repo` | string | yes | e.g. `beacon-board` |
-| `base` | string | no | compare-from tag, e.g. `v0.2.0` |
-| `head` | string | no | compare-to ref, default `main` |
+- **Trigger:** tag push `v*.*.*` (or manual `workflow_dispatch`). Publishing the release
+  creates the tag, which fires this.
+- **Pages:** enabled with `build_type: workflow`.
+- **Environment protection:** the `github-pages` environment must allow the tag. It has
+  a **`v*` tag** deployment policy — without it, the deploy job is *rejected* even
+  though the build passes.
 
-**Returns** (JSON): `repo`, `tags[]`, `releases[]`, `compare` (ahead/behind/total),
-`commits[]`, `changedFiles[]`, `actions[]` (status/conclusion/url), `workflows[]`,
-`changelog` (raw), `packageJson` (raw), `readme` (first 2 KB).
-
-**Auth**: reads `$vars.github_token`; calls `https://api.github.com` with the standard
-GitHub REST headers. Uses the sandbox's built-in secure `fetch`.
-
-Tool function body (runs in Flowise NodeVM sandbox; args exposed as `$owner`, etc.):
-
-```js
-const owner = $owner;
-const repo = $repo;
-const base = $base;
-const head = $head || 'main';
-const token = $vars.github_token;
-const api = 'https://api.github.com';
-const H = {
-  'Authorization': `Bearer ${token}`,
-  'Accept': 'application/vnd.github+json',
-  'X-GitHub-Api-Version': '2022-11-28',
-  'User-Agent': 'oss-release-copilot'
-};
-
-async function gh(path) {
-  const res = await fetch(`${api}${path}`, { headers: H });
-  if (!res.ok) {
-    const text = await res.text();
-    return { __error: true, status: res.status, path, body: text.slice(0, 500) };
-  }
-  return await res.json();
-}
-async function ghRaw(path) {
-  const res = await fetch(`${api}${path}`, { headers: { ...H, Accept: 'application/vnd.github.raw' } });
-  if (!res.ok) return null;
-  return await res.text();
-}
-
-const out = {};
-const repoInfo = await gh(`/repos/${owner}/${repo}`);
-out.repo = repoInfo.__error ? repoInfo : {
-  fullName: repoInfo.full_name,
-  description: repoInfo.description,
-  defaultBranch: repoInfo.default_branch,
-  language: repoInfo.language,
-  url: repoInfo.html_url
-};
-
-const tags = await gh(`/repos/${owner}/${repo}/tags?per_page=20`);
-out.tags = Array.isArray(tags) ? tags.map(t => t.name) : tags;
-
-const releases = await gh(`/repos/${owner}/${repo}/releases?per_page=10`);
-out.releases = Array.isArray(releases) ? releases.map(r => ({ tag: r.tag_name, name: r.name, draft: r.draft, prerelease: r.prerelease, publishedAt: r.published_at })) : releases;
-
-if (base) {
-  const cmp = await gh(`/repos/${owner}/${repo}/compare/${base}...${head}`);
-  if (!cmp.__error) {
-    out.compare = { base, head, aheadBy: cmp.ahead_by, behindBy: cmp.behind_by, totalCommits: cmp.total_commits };
-    out.commits = (cmp.commits || []).map(c => ({ sha: c.sha.slice(0,7), message: c.commit.message.split('\n')[0], author: c.commit.author && c.commit.author.name }));
-    out.changedFiles = (cmp.files || []).map(f => ({ file: f.filename, status: f.status, additions: f.additions, deletions: f.deletions }));
-  } else {
-    out.compare = cmp;
-  }
-}
-
-const runs = await gh(`/repos/${owner}/${repo}/actions/runs?per_page=10&branch=${encodeURIComponent(head)}`);
-out.actions = (runs && runs.workflow_runs) ? runs.workflow_runs.slice(0,10).map(r => ({ name: r.name, event: r.event, status: r.status, conclusion: r.conclusion, branch: r.head_branch, url: r.html_url, createdAt: r.created_at })) : (runs.__error ? runs : []);
-
-out.changelog = (await ghRaw(`/repos/${owner}/${repo}/contents/CHANGELOG.md`)) || 'CHANGELOG.md not found';
-const pkg = await ghRaw(`/repos/${owner}/${repo}/contents/package.json`);
-out.packageJson = pkg || 'package.json not found';
-out.readme = ((await ghRaw(`/repos/${owner}/${repo}/contents/README.md`)) || '').slice(0, 2000);
-
-const wf = await gh(`/repos/${owner}/${repo}/actions/workflows`);
-out.workflows = (wf && wf.workflows) ? wf.workflows.map(w => ({ name: w.name, path: w.path, state: w.state })) : [];
-
-return out;
-```
+### Preconditions to trigger a clean run
+Present in GitHub: a **base tag** to diff against (e.g. `v0.2.0`); commits on `head`
+ahead of it; passing CI on `head`; `package.json`/CHANGELOG at the target version.
+**Absent:** any release/tag for the **target** version — the flow creates it. Re-running
+the same version → NOGO (already released).
 
 ---
 
-## 8. Custom tool: `slack_send_notification`
+## 10. Trigger it
 
-**Input schema**
-
-| property | type | required |
-|---|---|---|
-| `text` | string | yes |
-
-**Behavior**: posts `{ text }` to `$vars.slack_webhook_url`. If the webhook is the
-placeholder/unset, it returns `{ sent:false, reason, draft }` so the flow keeps working.
-
-```js
-const webhook = $vars.slack_webhook_url;
-const text = $text;
-if (!webhook || webhook === 'PLACEHOLDER_SET_ME') {
-  return JSON.stringify({ sent: false, reason: 'slack_webhook_url variable not set', draft: text });
-}
-const res = await fetch(webhook, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ text })
-});
-const body = await res.text();
-return JSON.stringify({ sent: res.ok, status: res.status, response: body });
-```
-
----
-
-## 9. Demo repo: `kottesh/beacon-board`
-
-A tiny TypeScript status-board app used to exercise the flow. Named neutrally on
-purpose (the repo shouldn't advertise that it's a release-agent demo).
-
-```
-src/status.ts       summarizeStatus()
-src/report.ts       buildReport()
-src/incidents.ts    incidentSummary()
-tests/status.test.ts
-.github/workflows/ci.yml        (CI: test + build)
-.github/workflows/release.yml   (tag / workflow_dispatch → package artifact)
-CHANGELOG.md, README.md, package.json, docs/deployment.md
-```
-
-Release history:
-```
-v0.1.0  scaffold
-v0.2.0  detailed report builder
-main    v0.3.0 candidate (incident helper, empty-name fix, release workflow, version bump)
-```
-
-Verified `github_release_context` against it:
-```
-v0.2.0..main → 3 commits
-risky files: .github/workflows/release.yml, package.json
-CI latest: success
-```
-
----
-
-## 10. Running it
-
-1. Slack is already configured (`slack_webhook_url` set). Nothing to do here.
-2. Open **OSS Release Deployment Copilot** in Flowise, run the form:
+Form inputs:
 
 ```
 owner:         kottesh
@@ -368,61 +255,38 @@ head:          main
 targetVersion: v0.3.0
 ```
 
-3. Review notes + readiness + plan, then at **Confirm Deploy** reply `proceed` or `stop`.
+**UI:** open the flow → chat → fill the form → runs to *Confirm Deploy* → click
+**Proceed** (or Reject).
 
----
-
-## 11. Slack setup (one-time) — DONE
-
-Completed for this instance. Steps for reference / re-creation:
-
-1. https://api.slack.com/apps → **Create New App** → From scratch.
-2. **Incoming Webhooks** → enable → **Add New Webhook to Workspace** → pick a channel.
-3. Copy the webhook URL (`https://hooks.slack.com/services/…`).
-4. Set it into Flowise Variable `slack_webhook_url` (UI → Variables, or the API PUT below).
-
-Set via API:
+**API (two phases):**
 ```bash
-curl -X PUT "$BASE/variables/3d839b52-36aa-43b2-b078-f0c4f004de70" \
-  -H "Authorization: Bearer $FLOWISE_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"name":"slack_webhook_url","value":"https://hooks.slack.com/services/…","type":"static"}'
-```
-
-Test posting:
-```bash
-curl -X POST -H 'Content-Type: application/json' \
-  --data '{"text":"OSS Release Copilot connected ✅"}' \
-  "$SLACK_WEBHOOK_URL"
-```
-
----
-
-## 12. Admin API cheatsheet
-
-```bash
-FLOWISE_API_KEY=<key>
 BASE=http://localhost:3000/api/v1
+FID=7cb45c2a-0360-43eb-b6a0-97a40b38b57f
 
-# list objects
-curl -s $BASE/chatflows   -H "Authorization: Bearer $FLOWISE_API_KEY" | jq '.[]|{id,name,type}'
-curl -s $BASE/tools       -H "Authorization: Bearer $FLOWISE_API_KEY" | jq '.[]|{id,name}'
-curl -s $BASE/credentials?credentialName=openAIApi -H "Authorization: Bearer $FLOWISE_API_KEY" | jq '.[]|{id,name}'
-curl -s $BASE/variables   -H "Authorization: Bearer $FLOWISE_API_KEY" | jq '.[]|{id,name,type}'
+# 1) start — returns a chatId, pauses at Confirm Deploy
+curl -s -X POST $BASE/prediction/$FID -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"form":{"owner":"kottesh","repo":"beacon-board","base":"v0.2.0","head":"main","targetVersion":"v0.3.0"}}'
 
-# run the agentflow (once deployed)
-curl -s -X POST $BASE/prediction/7cb45c2a-0360-43eb-b6a0-97a40b38b57f \
-  -H "Authorization: Bearer $FLOWISE_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"question":"start","form":{"owner":"kottesh","repo":"beacon-board","base":"v0.2.0","head":"main","targetVersion":"v0.3.0"}}'
+# 2) approve — resume the paused run with the chatId
+curl -s -X POST $BASE/prediction/$FID -H "Authorization: Bearer $KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"chatId":"<CHAT_ID>","humanInput":{"type":"proceed","startNodeId":"humanInputAgentflow_0","feedback":"proceed"}}'
+# reject: "humanInput":{"type":"reject","startNodeId":"humanInputAgentflow_0","feedback":"stop"}
 ```
+
+The form and a `question` cannot be sent together in phase 1 — send only the `form`.
 
 ---
 
-## 13. Object IDs (this instance)
+## 11. Object IDs (this instance)
 
 | Object | id |
 |---|---|
 | Chatflow | `7cb45c2a-0360-43eb-b6a0-97a40b38b57f` |
 | Tool `github_release_context` | `a197895e-88bf-493b-8557-6a232dc5cee7` |
+| Tool `github_create_release` | `4b7b894f-9187-4bc5-b8d8-a4515348b5ad` |
+| Tool `github_run_status` | `e1287957-5fea-401a-82d4-ce58263e8e21` |
 | Tool `slack_send_notification` | `3793be90-d8af-4f4c-b561-3c20091d55d1` |
 | Credential (Cloudsway) | `71792a5b-09e6-4aa3-992f-5391b7de79c6` |
 | Variable `github_token` | `a03b3990-b4e4-4549-9f75-59b0fbe4c5cd` |
@@ -430,20 +294,13 @@ curl -s -X POST $BASE/prediction/7cb45c2a-0360-43eb-b6a0-97a40b38b57f \
 
 ---
 
-## 14. Safety model
+## 12. Safety model
 
-- No auto-deploy, no auto-publish, no workflow triggering.
-- GitHub tool is **read-only** (token scope used for reads).
-- Human Input node gates the entire deploy branch.
-- Slack tool degrades to "draft only" if the webhook is unset.
-- Secrets live in Flowise credential/variables, not in node prompts.
-
----
-
-## 15. Backlog / nice-to-have
-
-- Slack events: deploy completed ✅, deploy failed ❌, rollback recommended ↩️.
-- Semantic-version recommender node (patch/minor/major from conventional commits).
-- Post-deploy verification node that re-checks the release workflow run + tag/artifact.
-- `create_github_release_draft` tool (write scope) gated behind a second Human Input.
-- Persist generated notes/plan to local files (`release-notes/`, `deployment-plans/`).
+- **One write action** (`github_create_release`), and it sits **after** the Human Input
+  approval gate. Everything before the gate is read-only.
+- No auto-deploy: the flow publishes a release, but the deploy itself is GitHub's own
+  workflow reacting to the tag — the flow only *watches* it.
+- On failure the flow does **not** auto-rollback; it advises and notifies. The human
+  executes the rollback.
+- Secrets (GitHub token, Slack webhook) live in Flowise variables, not in node prompts.
+- The Slack tool degrades to "draft only" if the webhook is unset — no hard failure.
