@@ -1,0 +1,16 @@
+{
+    "provider": {
+        "baseUrl": "",
+        "apiKey": "",
+        "model": "MaaS_Cl_Sonnet_4.6_20260217"
+    },
+    "zep": {
+        "apiKey": ""
+    },
+    "thinking": "medium",
+    "bash": {
+        "defaultTimeoutMs": 30000,
+        "maxTimeoutMs": 600000
+    },
+    "user": "default"
+}

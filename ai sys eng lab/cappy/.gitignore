@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# secrets & local config (JSON) — commit only the .example file
+cappy.json
+.env
+.env.local
+
+# editor / os
+.DS_Store
+*.log

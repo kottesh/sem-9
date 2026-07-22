@@ -1,0 +1,24 @@
+{
+    "name": "krill",
+    "version": "0.1.0",
+    "type": "module",
+    "bin": {
+        "krill": "./src/index.ts"
+    },
+    "scripts": {
+        "dev": "tsx src/index.ts",
+        "start": "tsx src/index.ts",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "@getzep/zep-cloud": "^3.25.0",
+        "@krill/agent-core": "*",
+        "@krill/spotify": "*",
+        "chalk": "^5.4.0",
+        "dotenv": "^16.4.0",
+        "open": "^10.1.0",
+        "ora": "^8.1.0",
+        "zod": "^3.24.0"
+    }
+}
