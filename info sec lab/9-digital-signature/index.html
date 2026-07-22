@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DSA — signature workshop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div class="stamp-card">
+        <p class="overline">Digital Signature Algorithm</p>
+        <h1>Sign the note. Inspect the seal.</h1>
+        <p class="lede">DSA does not hide a message. It attaches proof. The sender uses a private signing key; the receiver checks the proof using only public information.</p>
+      </div>
+      <div class="stamp-mark" aria-hidden="true">
+        <span>DSA</span>
+        <small>validity check</small>
+      </div>
+    </header>
+
+    <section class="primer" aria-labelledby="primer-title">
+      <div>
+        <p class="overline">Read this first</p>
+        <h2 id="primer-title">The parts, named by what they do</h2>
+      </div>
+      <div class="primer-grid">
+        <article>
+          <b>Public parameters</b>
+          <p><strong>p</strong> is the prime modulus, the main arithmetic clock. <strong>q</strong> is a smaller prime clock for signature values. <strong>h</strong> is a seed used to derive the signing base.</p>
+        </article>
+        <article>
+          <b>Sender secrets</b>
+          <p>The private signing key proves ownership. The one-time signing secret must be fresh for each signature. Reusing it is unsafe in real DSA.</p>
+        </article>
+        <article>
+          <b>Signature packet</b>
+          <p>The signature has two pieces: <strong>commitment</strong>, traditionally <code>r</code>, and <strong>proof</strong>, traditionally <code>s</code>.</p>
+        </article>
+        <article>
+          <b>Receiver check</b>
+          <p>The receiver recomputes the commitment from the message, public key, and proof. If it matches the sent commitment, the signature is valid.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="bench" aria-label="Interactive DSA bench">
+      <article class="station sender-station">
+        <div class="station-head">
+          <p class="overline">Sender desk</p>
+          <h2>Create a signed packet</h2>
+        </div>
+
+        <div class="parameter-box">
+          <div class="box-title">
+            <span>Public setup</span>
+            <button id="rollParams" type="button" class="ghost">Generate valid p, q, h</button>
+          </div>
+          <div class="fields three">
+            <label>Prime modulus p
+              <input id="primeModulus" type="text" value="283">
+            </label>
+            <label>Subgroup prime q
+              <input id="subgroupSize" type="text" value="47">
+            </label>
+            <label>Generator seed h
+              <input id="generatorSeed" type="text" value="60">
+            </label>
+          </div>
+        </div>
+
+        <label class="wide">Message to sign
+          <textarea id="message" rows="5">hello</textarea>
+        </label>
+
+        <div class="fields two">
+          <label>Private key seed
+            <input id="privateSeed" type="text" value="12345">
+          </label>
+          <label>One-time secret seed
+            <input id="nonceSeed" type="text" value="67890">
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="runDsa" type="button" class="primary">Sign and send packet</button>
+          <button id="rollSecrets" type="button" class="ghost">Random seeds</button>
+        </div>
+        <p class="note">Seeds can be large. The app folds them into DSA's valid range and shows the normalized values in the ledger.</p>
+      </article>
+
+      <aside class="evidence" aria-label="Packet sent to receiver">
+        <div class="thread top"></div>
+        <div class="packet" id="packetView">
+          <p class="overline">Packet on the wire</p>
+          <dl>
+            <div>
+              <dt>Message</dt>
+              <dd id="sentMessage">hello</dd>
+            </div>
+            <div>
+              <dt>Public verification key</dt>
+              <dd id="sentY">225</dd>
+            </div>
+            <div>
+              <dt>Signature</dt>
+              <dd id="sentSignature">commitment 4, proof 15</dd>
+            </div>
+          </dl>
+        </div>
+        <div class="thread bottom"></div>
+      </aside>
+
+      <article class="station receiver-station">
+        <div class="station-head">
+          <p class="overline">Receiver desk</p>
+          <h2>Verify what arrived</h2>
+        </div>
+
+        <label class="wide">Received message
+          <textarea id="receivedMessage" rows="5">hello</textarea>
+        </label>
+
+        <div class="fields three receiver-fields">
+          <label>Public verification key
+            <input id="receivedY" type="text" value="225">
+          </label>
+          <label>Signature commitment
+            <input id="receivedCommitment" type="text" value="4">
+          </label>
+          <label>Signature proof
+            <input id="receivedProof" type="text" value="15">
+          </label>
+        </div>
+
+        <button id="verifyOnly" type="button" class="primary verify">Verify received packet</button>
+        <div id="verdict" class="verdict valid" role="status">Signature is valid</div>
+        <p class="note">Try changing the received message after signing. The receiver's recomputed commitment will stop matching.</p>
+      </article>
+    </section>
+
+    <section class="ledger" aria-labelledby="ledger-title">
+      <div class="ledger-head">
+        <div>
+          <p class="overline">Calculation ledger</p>
+          <h2 id="ledger-title">No mystery symbols</h2>
+        </div>
+        <p>Each card shows the name, the old DSA letter when useful, and the actual substituted calculation.</p>
+      </div>
+      <div id="steps" class="steps"></div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
