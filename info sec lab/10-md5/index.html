@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MD5 — the machine, step by step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="scanlines" aria-hidden="true"></div>
+
+<header class="masthead">
+  <div class="brand">
+    <span class="brand-mark">MD5</span>
+    <span class="brand-sub">message-digest engine · 128-bit</span>
+  </div>
+  <div class="masthead-note">
+    <span class="dot" id="live-dot"></span>
+    <span id="engine-status">idle</span>
+  </div>
+</header>
+
+<main>
+  <!-- HERO / INPUT -->
+  <section class="hero">
+    <p class="eyebrow">watch the transform</p>
+    <h1>Any input, exactly <span class="hl">128 bits</span> out.<br>Here is every gear that turns.</h1>
+    <p class="lede">Type below. The engine pads your bytes, splits them into 512-bit blocks, then runs
+      <strong>64 chained operations</strong> — four rounds of sixteen — mutating four 32-bit registers
+      until they settle into the digest.</p>
+
+    <div class="input-rig">
+      <label class="field-label" for="msg">input message</label>
+      <textarea id="msg" spellcheck="false" rows="2">abc</textarea>
+      <div class="input-meta">
+        <span id="byte-count">3 bytes</span>
+        <span class="sep">/</span>
+        <span id="bit-count">24 bits</span>
+        <span class="sep">/</span>
+        <span id="block-count">1 block</span>
+        <button class="ghost-btn" id="btn-empty">empty</button>
+        <button class="ghost-btn" id="btn-abc">"abc"</button>
+        <button class="ghost-btn" id="btn-fox">quick fox</button>
+      </div>
+    </div>
+
+    <div class="digest-readout">
+      <span class="digest-label">digest</span>
+      <code id="digest-out" class="digest-value">d41d8cd98f00b204e9800998ecf8427e</code>
+      <button class="ghost-btn" id="btn-copy">copy</button>
+    </div>
+    <p class="verify-line">verify in a shell: <code>echo -n 'abc' | md5sum</code></p>
+  </section>
+
+  <div class="workbench">
+    <!-- LEFT: PIPELINE -->
+    <div class="pipeline">
+
+      <section class="stage" id="stage-pad">
+        <div class="stage-head">
+          <span class="stage-no">phase 01</span>
+          <h2>Padding</h2>
+        </div>
+        <p class="stage-desc">Append one <code>1</code> bit, then zeros, then the original length as a
+          64-bit tail — so the total is a whole number of 512-bit blocks.</p>
+        <div class="byte-grid" id="pad-grid" aria-label="padded message bytes"></div>
+        <div class="legend">
+          <span><i class="sw sw-msg"></i>message</span>
+          <span><i class="sw sw-one"></i>1-bit marker (0x80)</span>
+          <span><i class="sw sw-zero"></i>zero fill</span>
+          <span><i class="sw sw-len"></i>64-bit length</span>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-init">
+        <div class="stage-head">
+          <span class="stage-no">phase 02</span>
+          <h2>Seed the registers</h2>
+        </div>
+        <p class="stage-desc">Four fixed 32-bit constants prime the state before any data touches it.</p>
+        <div class="seed-row">
+          <div class="seed"><span>A</span><code>67452301</code></div>
+          <div class="seed"><span>B</span><code>efcdab89</code></div>
+          <div class="seed"><span>C</span><code>98badcfe</code></div>
+          <div class="seed"><span>D</span><code>10325476</code></div>
+        </div>
+      </section>
+
+      <section class="stage" id="stage-ops">
+        <div class="stage-head">
+          <span class="stage-no">phase 03</span>
+          <h2>64 chained operations</h2>
+        </div>
+        <p class="stage-desc">Each step reads the current registers, mixes in a message word and a
+          sine-derived constant, rotates, and writes the result back. The function swaps every 16 steps —
+          that's what we call a "round".</p>
+
+        <div class="round-map" id="round-map">
+          <div class="round-cell" data-round="0"><b>Round 1</b><span>F · steps 1–16</span></div>
+          <div class="round-cell" data-round="1"><b>Round 2</b><span>G · steps 17–32</span></div>
+          <div class="round-cell" data-round="2"><b>Round 3</b><span>H · steps 33–48</span></div>
+          <div class="round-cell" data-round="3"><b>Round 4</b><span>I · steps 49–64</span></div>
+        </div>
+
+        <div class="op-explain" id="op-explain">
+          <div class="op-formula">
+            <code>temp = B + rotl(A + <span class="fn-tag" id="fn-tag">F(B,C,D)</span> + M[<span id="mg-idx">0</span>] + K[<span id="k-idx">0</span>], <span id="s-amt">7</span>)</code>
+          </div>
+          <div class="op-terms" id="op-terms"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- RIGHT: LIVE CONSOLE -->
+    <aside class="console">
+      <div class="console-head">
+        <h3>register console</h3>
+        <span class="console-step" id="console-step">step 0 / 64</span>
+      </div>
+
+      <div class="registers" id="registers">
+        <div class="reg" data-reg="A"><span class="reg-name">A</span><code class="reg-val" id="reg-A">67452301</code></div>
+        <div class="reg" data-reg="B"><span class="reg-name">B</span><code class="reg-val" id="reg-B">efcdab89</code></div>
+        <div class="reg" data-reg="C"><span class="reg-name">C</span><code class="reg-val" id="reg-C">98badcfe</code></div>
+        <div class="reg" data-reg="D"><span class="reg-name">D</span><code class="reg-val" id="reg-D">10325476</code></div>
+      </div>
+
+      <div class="round-flag" id="round-flag">
+        <span class="round-flag-label">active round</span>
+        <span class="round-flag-val" id="round-flag-val">— seed —</span>
+      </div>
+
+      <div class="transport">
+        <button class="tbtn" id="btn-reset" title="reset to seed">⏮</button>
+        <button class="tbtn" id="btn-prev" title="previous step">◀</button>
+        <button class="tbtn tbtn-play" id="btn-play" title="play / pause">▶</button>
+        <button class="tbtn" id="btn-next" title="next step">▶|</button>
+        <button class="tbtn" id="btn-end" title="jump to digest">⏭</button>
+      </div>
+
+      <input type="range" id="scrub" class="scrub" min="0" max="64" value="0" />
+
+      <div class="speed-row">
+        <span>speed</span>
+        <input type="range" id="speed" min="1" max="20" value="8" />
+      </div>
+
+      <p class="console-hint">the glowing register is the one just written this step.</p>
+    </aside>
+  </div>
+
+  <footer class="foot">
+    <p>MD5 is cryptographically broken — collisions are cheap. Great for learning and checksums, never for
+       passwords or signatures. Reach for SHA-256 instead.</p>
+  </footer>
+</main>
+
+<script src="md5.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
